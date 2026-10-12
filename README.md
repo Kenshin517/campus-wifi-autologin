@@ -21,7 +21,7 @@ Cara kerjanya: begitu laptop konek ke jaringan, script cek — kalau SSID-nya `e
 ## 🚀 Cara Pakai
 
 ### 1. Download repo ini
-Klik tombol hijau **Code → Download ZIP**, lalu extract. Atau kalau punya git:
+Klik tombol hijau **Code → Download ZIP**, lalu extract. Jika punya git:
 ```powershell
 git clone https://github.com/USERNAME/campus-wifi-autologin.git
 cd campus-wifi-autologin
@@ -40,7 +40,7 @@ Di folder repo, jalankan:
 .\setup.ps1
 ```
 Script akan:
-1. Minta **NetID** dan **password** kamu (password nggak kelihatan pas diketik — normal).
+1. Minta **NetID** dan **password** kamu (password tidak akan terlihat ketika diketik).
 2. Simpan ke `config.ps1` (password ter-enkripsi).
 3. Daftarkan Task Scheduler otomatis.
 4. Langsung tes sekali & nunjukin log-nya.
