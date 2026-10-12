@@ -18,34 +18,29 @@ Cara kerjanya: begitu laptop konek ke jaringan, script cek — kalau SSID-nya `e
 
 ---
 
-## 🚀 Cara Pakai
+## 🚀 Cara Pakai (CARA MUDAH — untuk semua orang)
 
 ### 1. Download repo ini
-Klik tombol hijau **Code → Download ZIP**, lalu extract. Jika punya git:
-```powershell
-git clone https://github.com/USERNAME/campus-wifi-autologin.git
-cd campus-wifi-autologin
-```
+Klik tombol hijau **Code → Download ZIP**, lalu extract (klik kanan ZIP → Extract All).
 
-### 2. Izinkan eksekusi script (sekali saja)
-Buka **PowerShell**, jalankan:
-```powershell
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-Ketik `Y` kalau ditanya.
+### 2. Dobel-klik `JALANKAN.bat`
+Buka folder hasil extract, lalu **dobel-klik file `JALANKAN.bat`**.
+- Muncul popup Windows minta izin Administrator → klik **Yes**.
+- Masukkan **NetID** dan **password** kamu (password tidak akan terlihat ketika diketik — itu normal, tinggal ketik lalu Enter).
 
-### 3. Jalankan setup
-Di folder repo, jalankan:
-```powershell
-.\setup.ps1
-```
-Script akan:
-1. Minta **NetID** dan **password** kamu (password tidak akan terlihat ketika diketik).
-2. Simpan ke `config.ps1` (password ter-enkripsi).
-3. Daftarkan Task Scheduler otomatis.
-4. Langsung tes sekali & nunjukin log-nya.
+Selesai! `JALANKAN.bat` otomatis mengurus semua izin Windows (execution policy, unblock file, admin), bikin config, dan daftar Task Scheduler. Mulai sekarang auto-login jalan sendiri tiap kamu konek WiFi kampus.
 
-Selesai! Mulai sekarang auto-login jalan sendiri.
+> Kalau Windows SmartScreen muncul ("Windows protected your PC"), klik **More info → Run anyway**. Ini wajar untuk file .bat yang baru di-download.
+
+---
+
+## 🛠️ Cara Manual (opsional, buat yang paham PowerShell)
+
+Kalau lebih suka lewat PowerShell: buka **PowerShell as Administrator**, masuk ke folder repo, lalu:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+Jangan pakai `.\setup.ps1` langsung — file dari internet belum ter-sign jadi akan diblokir. Gunakan perintah `-ExecutionPolicy Bypass` di atas.
 
 ---
 
@@ -53,23 +48,22 @@ Selesai! Mulai sekarang auto-login jalan sendiri.
 
 | Mau apa | Jalankan |
 |---|---|
-| Ganti password / NetID | `.\setup.ps1` (jalankan ulang) |
-| Copot semuanya | `.\uninstall.ps1` |
+| Ganti password / NetID | dobel-klik `JALANKAN.bat` lagi |
+| Copot semuanya | dobel-klik `COPOT.bat` |
 | Cek log | buka `autologin.log` di folder repo |
-| Test manual | `.\connect-campus-wifi.ps1` |
 
 ---
 
 ## ❓ Troubleshooting
 
-**"running scripts is disabled on this system"**
-→ Belum jalanin langkah 2. Jalankan `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`.
+**"running scripts is disabled" / "is not digitally signed" / "Access is denied"**
+→ Ini kejadian kalau jalanin `.\setup.ps1` langsung tanpa admin. Pakai `JALANKAN.bat` (cara mudah di atas) — semua masalah izin ini sudah ditangani otomatis.
+
+**Windows SmartScreen: "Windows protected your PC"**
+→ Klik **More info → Run anyway**. Wajar untuk file .bat baru.
 
 **Log bilang "POST login gagal" atau status bukan 200**
-→ Kemungkinan NetID/password salah. Jalankan ulang `.\setup.ps1`.
-
-**Udah login tapi status Task "Running" terus**
-→ Pastikan di Task Scheduler, tab Actions, Program-nya `powershell.exe` dan argument-nya pakai `-File`. `setup.ps1` sudah set ini otomatis, jadi harusnya aman.
+→ Kemungkinan NetID/password salah. Jalankan ulang `JALANKAN.bat`.
 
 **Mau tes dari kondisi "belum login" padahal sudah login**
 → Portal nyimpen sesi per-MAC address di server, bukan di laptop. Restart/forget network nggak reset. Cara paling cepat: aktifkan **Random hardware addresses** di Settings → WiFi → eepiswlan, lalu reconnect.
@@ -94,6 +88,8 @@ Script ini buat memudahkan login ke WiFi kampus pakai akun kamu sendiri yang sah
 
 ```
 campus-wifi-autologin/
+├── JALANKAN.bat              # <- DOBEL-KLIK INI buat setup (cara mudah)
+├── COPOT.bat                 # dobel-klik buat uninstall
 ├── connect-campus-wifi.ps1   # script utama (dipanggil Task Scheduler)
 ├── setup.ps1                 # installer: config + daftar task
 ├── uninstall.ps1             # copot task + hapus config
