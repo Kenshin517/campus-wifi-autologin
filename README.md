@@ -2,7 +2,7 @@
 
 Script PowerShell yang **otomatis login ke captive portal WiFi kampus PENS** setiap kali laptopmu konek ke `eepiswlan`. Nggak perlu lagi buka browser dan ketik NetID + password manual tiap pagi atau tiap sesi login expired.
 
-Cara kerjanya: begitu laptop konek ke jaringan, script cek — kalau SSID-nya `eepiswlan` **dan** belum ada internet, dia submit form login portal otomatis di background. Kalau SSID lain (WiFi rumah, hotspot, dll) atau internet sudah jalan, dia langsung skip.
+Cara kerjanya: begitu laptop connect ke jaringan, script cek — kalau SSID-nya `eepiswlan` **dan** belum ada internet, dia submit form login portal otomatis di background. Kalau SSID lain (WiFi rumah, hotspot, dll) atau internet sudah jalan, dia langsung skip.
 
 > Dibuat & dites di Windows 11. Perlu PowerShell 5.1+ (bawaan Windows).
 
@@ -10,10 +10,10 @@ Cara kerjanya: begitu laptop konek ke jaringan, script cek — kalau SSID-nya `e
 
 ## ✨ Fitur
 
-- **Auto-login** tiap konek ke `eepiswlan`, tanpa buka browser.
+- **Auto-login** tiap connect ke `eepiswlan`, tanpa buka browser.
 - **Aman**: password nggak disimpan plaintext — di-enkripsi pakai DPAPI Windows (cuma bisa dibaca di akun & PC kamu sendiri), dan file kredensial di-`.gitignore`.
 - **Deteksi domain portal otomatis** — kampus pakai beberapa domain (`iac3`, `iac32`, dst) tergantung access point; script nangkep yang aktif lewat redirect, nggak di-hardcode.
-- **Dua trigger**: tiap konek jaringan + tiap hari jam 00:05 (portal kampus reset sesi tiap tengah malam).
+- **Dua trigger**: tiap connect jaringan + tiap hari jam 00:05 (portal kampus reset sesi tiap tengah malam).
 - **Setup satu klik** lewat `setup.ps1` — bikin config + daftar Task Scheduler sekaligus.
 
 ---
