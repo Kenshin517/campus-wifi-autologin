@@ -1,0 +1,6 @@
+# Kredensial -- JANGAN PERNAH di-commit
+config.ps1
+
+# Log runtime
+autologin.log
+*.log
