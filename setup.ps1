@@ -40,7 +40,8 @@ $configContent = @"
 `$CampusNetID = "$netID"
 `$CampusPassEncrypted = "$encryptedPass"
 "@
-Set-Content -Path $configPath -Value $configContent -Encoding utf8
+# Tulis tanpa BOM (ASCII) biar dot-source di PowerShell 5.1 bersih.
+[System.IO.File]::WriteAllText($configPath, $configContent, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "[OK] config.ps1 tersimpan (password ter-enkripsi)." -ForegroundColor Green
 
 # ---- 3. Daftarkan Task Scheduler ----

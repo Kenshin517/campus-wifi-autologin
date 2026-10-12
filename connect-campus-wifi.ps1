@@ -39,6 +39,14 @@ function Write-Log {
     param([string]$msg)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "$timestamp - $msg" | Out-File -FilePath $logFile -Append -Encoding utf8
+
+    # Jaga log biar nggak numpuk selamanya: simpan 200 baris terakhir saja.
+    try {
+        $lines = @(Get-Content -LiteralPath $logFile -ErrorAction Stop)
+        if ($lines.Count -gt 200) {
+            $lines[-200..-1] | Set-Content -LiteralPath $logFile -Encoding utf8
+        }
+    } catch { }
 }
 
 function Get-CurrentSSID {
