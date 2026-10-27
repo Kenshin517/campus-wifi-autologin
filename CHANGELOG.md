@@ -40,5 +40,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - First release: Windows PowerShell script with Task Scheduler triggers and
   DPAPI-encrypted credentials.
 
-[2.0.0]: https://github.com/Kenshin517/campus-wifi-autologin/releases/tag/v2.0.0
+[2.0.0]: https://github.com/Kenshin517/campus-wifi-autologin/commit/5dd791d
 [1.0.0]: https://github.com/Kenshin517/campus-wifi-autologin/commit/a098326

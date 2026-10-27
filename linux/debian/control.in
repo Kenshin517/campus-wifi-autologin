@@ -4,7 +4,7 @@ Architecture: all
 Maintainer: Sandy Aprilando <sandyaprilando59@gmail.com>
 Installed-Size: @SIZE@
 Depends: curl, util-linux, debconf (>= 0.5) | debconf-2.0
-Recommends: network-manager | iw | wireless-tools
+Suggests: network-manager | iw | wireless-tools
 Section: net
 Priority: optional
 Homepage: https://github.com/Kenshin517/campus-wifi-autologin
