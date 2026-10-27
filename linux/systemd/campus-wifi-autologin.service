@@ -1,0 +1,28 @@
+[Unit]
+Description=PENS campus Wi-Fi captive portal auto-login
+Documentation=https://github.com/Kenshin517/campus-wifi-autologin
+After=network.target NetworkManager.service
+ConditionPathExists=/etc/campus-wifi-autologin/config
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/campus-wifi-autologin run
+TimeoutStartSec=5min
+# Exit code 2 = the portal rejected the credentials; do not mark the unit failed.
+SuccessExitStatus=2
+
+StateDirectory=campus-wifi-autologin
+StateDirectoryMode=0700
+LogsDirectory=campus-wifi-autologin
+RuntimeDirectory=campus-wifi-autologin
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

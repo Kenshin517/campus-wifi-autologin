@@ -1,0 +1,14 @@
+Template: campus-wifi-autologin/netid
+Type: string
+Description: PENS NetID:
+ Enter the NetID you use to log in to the eepiswlan captive portal.
+ .
+ Leave this empty to configure it later with:
+ sudo campus-wifi-autologin setup
+
+Template: campus-wifi-autologin/password
+Type: password
+Description: Password for this NetID:
+ The password is stored in /etc/campus-wifi-autologin/config, which only
+ root can read. It is removed from the debconf database right after
+ installation.

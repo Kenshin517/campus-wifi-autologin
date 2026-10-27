@@ -1,0 +1,15 @@
+#!/bin/sh
+# NetworkManager dispatcher hook for campus-wifi-autologin.
+# Triggers an immediate check whenever a connection comes up or its
+# connectivity state changes, instead of waiting for the 2-minute timer.
+
+case "$2" in
+    up|connectivity-change|dhcp4-change)
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+            systemctl start --no-block campus-wifi-autologin.service
+        else
+            campus-wifi-autologin run >/dev/null 2>&1 &
+        fi
+        ;;
+esac
+exit 0

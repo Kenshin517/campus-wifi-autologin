@@ -1,0 +1,10 @@
+* text=auto
+
+# Linux files must keep LF line endings or bash/systemd will choke on them.
+linux/** text eol=lf
+*.sh     text eol=lf
+
+# Windows files need CRLF (cmd.exe misparses .bat files with LF endings).
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.ps1    text eol=crlf

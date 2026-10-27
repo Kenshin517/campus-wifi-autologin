@@ -1,0 +1,394 @@
+#!/usr/bin/env bash
+#
+# campus-wifi-autologin - automatic login for the PENS campus Wi-Fi captive portal
+# https://github.com/Kenshin517/campus-wifi-autologin
+#
+# Usage: campus-wifi-autologin <command>
+#   run      Check connectivity and log in if needed (called by systemd/NM)
+#   setup    Save your NetID and password
+#   status   Show SSID, connectivity, service state and recent log lines
+#   logs     Follow the log
+#   version  Print the version
+#
+# SPDX-License-Identifier: MIT
+
+set -uo pipefail
+
+readonly VERSION="2.0.0"
+readonly PROG="campus-wifi-autologin"
+
+CONFIG_FILE="${CAMPUS_WIFI_CONFIG:-/etc/campus-wifi-autologin/config}"
+STATE_DIR="${CAMPUS_WIFI_STATE_DIR:-/var/lib/campus-wifi-autologin}"
+LOG_DIR="${CAMPUS_WIFI_LOG_DIR:-/var/log/campus-wifi-autologin}"
+LOCK_FILE="${CAMPUS_WIFI_LOCK:-/run/campus-wifi-autologin/run.lock}"
+LOG_FILE="$LOG_DIR/autologin.log"
+PORTAL_CACHE="$STATE_DIR/portal-url"
+LOG_MAX_LINES=500
+
+# Defaults; can be overridden in the config file.
+TARGET_SSID="eepiswlan"
+PORTAL_DOMAIN="pens.ac.id"
+MAX_ATTEMPTS=6
+RETRY_DELAY=10
+VERBOSE=0
+NETID=""
+PASSWORD=""
+
+PROBE_URLS=(
+    "http://neverssl.com/"
+    "http://detectportal.firefox.com/canonical.html"
+    "http://connectivitycheck.gstatic.com/generate_204"
+)
+
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+log() {
+    local line
+    line="$(date '+%Y-%m-%d %H:%M:%S')  $*"
+    echo "$line" >&2
+    if [ -d "$LOG_DIR" ] && [ -w "$LOG_DIR" ]; then
+        echo "$line" >>"$LOG_FILE"
+        if [ "$(wc -l <"$LOG_FILE")" -gt "$LOG_MAX_LINES" ]; then
+            local tmp
+            tmp="$(mktemp "$LOG_DIR/.trim.XXXXXX")" &&
+                tail -n "$LOG_MAX_LINES" "$LOG_FILE" >"$tmp" && mv -f "$tmp" "$LOG_FILE"
+        fi
+    fi
+}
+
+vlog() { [ "$VERBOSE" = "1" ] && log "$@"; return 0; }
+
+die() { echo "$PROG: $*" >&2; exit 1; }
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "this command needs root. Try: sudo $PROG $1"
+}
+
+# Parse KEY=VALUE lines. The file is never sourced, so a password containing
+# quotes, $ or backticks cannot execute anything.
+load_config() {
+    [ -r "$CONFIG_FILE" ] || die "cannot read $CONFIG_FILE. Run: sudo $PROG setup"
+    local key value
+    while IFS='=' read -r key value || [ -n "$key" ]; do
+        case "$key" in
+            ''|\#*) continue ;;
+        esac
+        case "$key" in
+            NETID)          NETID="$value" ;;
+            PASSWORD)       PASSWORD="$value" ;;
+            TARGET_SSID)    TARGET_SSID="$value" ;;
+            PORTAL_DOMAIN)  PORTAL_DOMAIN="$value" ;;
+            MAX_ATTEMPTS)   [[ "$value" =~ ^[0-9]+$ ]] && MAX_ATTEMPTS="$value" ;;
+            RETRY_DELAY)    [[ "$value" =~ ^[0-9]+$ ]] && RETRY_DELAY="$value" ;;
+            VERBOSE)        VERBOSE="$value" ;;
+        esac
+    done <"$CONFIG_FILE"
+    [ -n "$NETID" ] && [ -n "$PASSWORD" ] || die "NETID/PASSWORD missing in $CONFIG_FILE. Run: sudo $PROG setup"
+}
+
+# Prints the SSID of the active Wi-Fi connection, or nothing if unknown.
+get_ssid() {
+    local ssid=""
+    if command -v nmcli >/dev/null 2>&1; then
+        ssid="$(nmcli -t -f ACTIVE,SSID device wifi list --rescan no 2>/dev/null |
+            awk -F: '$1=="yes"{sub(/^yes:/,""); gsub(/\\:/,":"); print; exit}')"
+    fi
+    if [ -z "$ssid" ] && command -v iwgetid >/dev/null 2>&1; then
+        ssid="$(iwgetid -r 2>/dev/null)"
+    fi
+    if [ -z "$ssid" ] && command -v iw >/dev/null 2>&1; then
+        ssid="$(iw dev 2>/dev/null | awk '/^[[:space:]]*ssid /{sub(/^[[:space:]]*ssid /,""); print; exit}')"
+    fi
+    printf '%s' "$ssid"
+}
+
+has_internet() {
+    local body code
+    body="$(curl -fsS --max-time 5 http://detectportal.firefox.com/success.txt 2>/dev/null)"
+    [ "${body%%[[:space:]]*}" = "success" ] && return 0
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+        http://connectivitycheck.gstatic.com/generate_204 2>/dev/null)"
+    [ "$code" = "204" ]
+}
+
+url_host() {
+    local h="${1#*://}"
+    h="${h%%[/?#]*}"
+    printf '%s' "${h%%:*}"
+}
+
+is_portal_url() {
+    local host
+    [ -n "${1:-}" ] || return 1
+    host="$(url_host "$1")"
+    [ "$host" = "$PORTAL_DOMAIN" ] || [[ "$host" == *".$PORTAL_DOMAIN" ]]
+}
+
+# Extracts one query parameter (still URL-encoded) from a URL.
+query_param() {
+    local q="${1#*\?}"
+    [ "$q" = "$1" ] && return 0
+    q="${q%%#*}"
+    local pair
+    local -a pairs
+    IFS='&' read -ra pairs <<<"$q"
+    for pair in "${pairs[@]}"; do
+        if [ "${pair%%=*}" = "$2" ]; then
+            printf '%s' "${pair#*=}"
+            return 0
+        fi
+    done
+}
+
+urldecode() {
+    local s="${1//+/ }"
+    printf '%b' "${s//%/\\x}"
+}
+
+# Finds the captive portal login URL by requesting plain-HTTP probe URLs and
+# following what the portal does with them (30x redirect or HTML/JS redirect).
+find_portal_url() {
+    local probe url out code location body_file m
+    body_file="$(mktemp)"
+    for probe in "${PROBE_URLS[@]}"; do
+        url="$probe"
+        for _ in 1 2 3 4 5; do
+            : >"$body_file"
+            out="$(curl -sk -o "$body_file" -w '%{http_code} %{redirect_url}' \
+                --max-time 8 "$url" 2>/dev/null)" || break
+            code="${out%% *}"
+            location="${out#* }"
+            if [[ "$code" =~ ^30[0-9]$ ]] && [ -n "$location" ]; then
+                url="$location"
+                continue
+            fi
+            if is_portal_url "$url"; then
+                rm -f "$body_file"
+                printf '%s' "$url"
+                return 0
+            fi
+            m="$(grep -oE "https?://[A-Za-z0-9.-]*${PORTAL_DOMAIN//./\\.}[^\"'<> ]*" "$body_file" | head -n1)"
+            if [ -n "$m" ]; then
+                rm -f "$body_file"
+                printf '%s' "${m//&amp;/&}"
+                return 0
+            fi
+            break
+        done
+    done
+    rm -f "$body_file"
+    return 1
+}
+
+# Returns 0 = submitted, 2 = portal said the credentials are wrong, 1 = error.
+submit_login() {
+    local url="$1" redirurl zone code workdir
+    redirurl="$(query_param "$url" redirurl)"
+    redirurl="$(urldecode "${redirurl:-http://detectportal.firefox.com/success.txt}")"
+    zone="$(urldecode "$(query_param "$url" zone)")"
+
+    # Pass the password through a root-only temp file so it never appears in
+    # the process list (ps / /proc/<pid>/cmdline).
+    workdir="$(mktemp -d)"
+    chmod 700 "$workdir"
+    printf '%s' "$PASSWORD" >"$workdir/pass"
+
+    local -a form=(
+        --data-urlencode "auth_user=$NETID"
+        --data-urlencode "auth_pass@$workdir/pass"
+        --data-urlencode "redirurl=$redirurl"
+        --data-urlencode "accept=Login"
+    )
+    [ -n "$zone" ] && form+=(--data-urlencode "zone=$zone")
+
+    code="$(curl -sk -o "$workdir/resp" -w '%{http_code}' --max-time 15 \
+        -X POST "${form[@]}" "$url" 2>/dev/null)"
+    local rc=$?
+    local rejected=1
+    grep -qiE 'invalid|incorrect|wrong password|salah|gagal' "$workdir/resp" 2>/dev/null && rejected=0
+    rm -rf "$workdir"
+
+    if [ $rc -ne 0 ]; then
+        log "Login request failed (curl exit $rc)."
+        return 1
+    fi
+    log "Login form submitted (HTTP $code)."
+    [ $rejected -eq 0 ] && return 2
+    return 0
+}
+
+# ------------------------------------------------------------------------------
+# Commands
+# ------------------------------------------------------------------------------
+cmd_run() {
+    require_root run
+    load_config
+    mkdir -p "$STATE_DIR" "$LOG_DIR" "$(dirname "$LOCK_FILE")" 2>/dev/null
+    chmod 700 "$STATE_DIR" 2>/dev/null
+
+    exec 9>"$LOCK_FILE" || die "cannot open lock $LOCK_FILE"
+    flock -n 9 || exit 0   # another run is in progress
+
+    local attempt ssid portal result rejected=0
+    for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+        ssid="$(get_ssid)"
+
+        if [ -n "$ssid" ] && [ "$ssid" != "$TARGET_SSID" ]; then
+            vlog "Not on $TARGET_SSID (SSID: $ssid). Skipping."
+            return 0
+        fi
+
+        if has_internet; then
+            if [ "$attempt" -gt 1 ]; then log "Internet is reachable."; else vlog "Already online."; fi
+            return 0
+        fi
+
+        [ "$attempt" -eq 1 ] &&
+            log "No internet on ${ssid:-unknown SSID}. Starting login (up to $MAX_ATTEMPTS attempts)."
+
+        if portal="$(find_portal_url)"; then
+            printf '%s\n' "$portal" >"$PORTAL_CACHE"
+        elif [ -s "$PORTAL_CACHE" ]; then
+            portal="$(head -n1 "$PORTAL_CACHE")"
+            log "Attempt $attempt: portal redirect not seen, using last known portal URL."
+        fi
+
+        if ! is_portal_url "${portal:-}"; then
+            # Without a known SSID, only act when the campus portal is actually seen.
+            log "Attempt $attempt: captive portal not found yet (network may still be starting)."
+            sleep "$RETRY_DELAY"
+            continue
+        fi
+
+        log "Attempt $attempt: portal ${portal%%\?*}"
+        submit_login "$portal"
+        result=$?
+        sleep 3
+
+        if has_internet; then
+            log "SUCCESS: logged in, internet is reachable."
+            return 0
+        fi
+        if [ "$result" -eq 2 ]; then
+            rejected=$((rejected + 1))
+            if [ "$rejected" -ge 2 ]; then
+                log "Portal rejected the login twice. Check your NetID/password: sudo $PROG setup"
+                return 2
+            fi
+        fi
+        sleep "$RETRY_DELAY"
+    done
+
+    log "FAILED after $MAX_ATTEMPTS attempts. Will retry on the next scheduled run."
+    return 1
+}
+
+cmd_setup() {
+    require_root setup
+    local netid="" pass="" pass2=""
+    echo "campus-wifi-autologin setup"
+    echo "Credentials are stored in $CONFIG_FILE (readable by root only)."
+    echo
+    while [ -z "$netid" ]; do read -rp "NetID: " netid; done
+    while :; do
+        read -rsp "Password (input is hidden): " pass; echo
+        read -rsp "Repeat password: " pass2; echo
+        [ -n "$pass" ] && [ "$pass" = "$pass2" ] && break
+        echo "Passwords are empty or do not match, try again."
+    done
+    write_config "$netid" "$pass"
+    echo "Saved."
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        systemctl enable --now campus-wifi-autologin.timer >/dev/null 2>&1 || true
+        systemctl start --no-block campus-wifi-autologin.service >/dev/null 2>&1 || true
+        echo "Auto-login is active. Check it with: $PROG status"
+    fi
+}
+
+write_config() {
+    local dir
+    dir="$(dirname "$CONFIG_FILE")"
+    mkdir -p "$dir"
+    chmod 755 "$dir"
+    local tmp
+    tmp="$(umask 077 && mktemp "$dir/.config.XXXXXX")" || die "cannot write to $dir"
+    {
+        echo "# campus-wifi-autologin configuration (root-only). Edit with: sudo $PROG setup"
+        echo "NETID=$1"
+        echo "PASSWORD=$2"
+        echo "TARGET_SSID=$TARGET_SSID"
+        echo "PORTAL_DOMAIN=$PORTAL_DOMAIN"
+        echo "MAX_ATTEMPTS=$MAX_ATTEMPTS"
+        echo "RETRY_DELAY=$RETRY_DELAY"
+        echo "VERBOSE=0"
+    } >"$tmp"
+    chmod 600 "$tmp"
+    chown root:root "$tmp" 2>/dev/null
+    mv -f "$tmp" "$CONFIG_FILE"
+}
+
+cmd_status() {
+    local ssid
+    ssid="$(get_ssid)"
+    echo "Version      : $VERSION"
+    echo "Wi-Fi SSID   : ${ssid:-<not connected / unknown>}"
+    if has_internet; then echo "Internet     : reachable"; else echo "Internet     : NOT reachable"; fi
+    if [ -r "$CONFIG_FILE" ]; then
+        echo "Config       : $CONFIG_FILE"
+    elif [ -e "$CONFIG_FILE" ]; then
+        echo "Config       : $CONFIG_FILE (root-only; run with sudo to check it)"
+    else
+        echo "Config       : missing - run: sudo $PROG setup"
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        echo "Timer        : $(systemctl is-active campus-wifi-autologin.timer 2>/dev/null)," \
+            "$(systemctl is-enabled campus-wifi-autologin.timer 2>/dev/null)"
+    fi
+    echo
+    echo "Recent log ($LOG_FILE):"
+    if [ -r "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        tail -n 10 "$LOG_FILE" | sed 's/^/  /'
+    else
+        echo "  (empty - nothing to do yet, or not on campus Wi-Fi)"
+    fi
+}
+
+cmd_logs() {
+    [ -r "$LOG_FILE" ] || die "no log at $LOG_FILE yet"
+    exec tail -n 30 -F "$LOG_FILE"
+}
+
+usage() {
+    cat <<EOF
+$PROG $VERSION - automatic login for the PENS campus Wi-Fi captive portal
+
+Usage: $PROG <command>
+
+Commands:
+  run       Check connectivity and log in if needed (used by systemd)
+  setup     Save or change your NetID and password
+  status    Show SSID, connectivity, timer state and recent log lines
+  logs      Follow the log
+  version   Print the version
+  help      Show this help
+
+Config: $CONFIG_FILE
+Log:    $LOG_FILE
+EOF
+}
+
+main() {
+    case "${1:-help}" in
+        run)                 cmd_run ;;
+        setup)               cmd_setup ;;
+        status)              cmd_status ;;
+        logs)                cmd_logs ;;
+        version|--version|-V) echo "$PROG $VERSION" ;;
+        help|--help|-h)      usage ;;
+        *)                   usage >&2; exit 64 ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,6 @@
+campus-wifi-autologin (2.0.0) unstable; urgency=medium
+
+  * Rewrite: retries while the network starts, portal URL cache, systemd
+    timer every 2 minutes, NetworkManager hook, debconf setup.
+
+ -- Sandy Aprilando <sandyaprilando59@gmail.com>  Wed, 28 Oct 2026 07:00:00 +0700

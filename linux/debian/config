@@ -1,0 +1,16 @@
+#!/bin/sh
+# shellcheck disable=SC2119,SC1091
+set -e
+. /usr/share/debconf/confmodule
+
+# Ask only on first install or on dpkg-reconfigure; keep existing credentials on upgrade.
+if [ ! -s /etc/campus-wifi-autologin/config ] || [ "$1" = "reconfigure" ]; then
+    db_input high campus-wifi-autologin/netid || true
+    db_go || true
+    db_get campus-wifi-autologin/netid
+    if [ -n "$RET" ]; then
+        db_input high campus-wifi-autologin/password || true
+        db_go || true
+    fi
+fi
+exit 0

@@ -1,6 +1,16 @@
-# Kredensial -- JANGAN PERNAH di-commit
-config.ps1
+# Build output (the .deb is distributed separately, never committed)
+dist/
+*.deb
 
-# Log runtime
-autologin.log
+# Runtime files, in case someone runs the scripts from the repo folder
 *.log
+config.json
+config.ps1
+portal-url.txt
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

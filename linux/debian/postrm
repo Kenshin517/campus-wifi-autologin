@@ -1,0 +1,16 @@
+#!/bin/sh
+# shellcheck disable=SC2119,SC1091
+set -e
+case "$1" in
+remove)
+    [ -d /run/systemd/system ] && systemctl daemon-reload >/dev/null 2>&1 || true
+    ;;
+purge)
+    rm -rf /etc/campus-wifi-autologin /var/lib/campus-wifi-autologin /var/log/campus-wifi-autologin
+    if [ -e /usr/share/debconf/confmodule ]; then
+        . /usr/share/debconf/confmodule
+        db_purge
+    fi
+    ;;
+esac
+exit 0

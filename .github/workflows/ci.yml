@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux - lint, build and install .deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: |
+          shellcheck -x \
+            linux/bin/campus-wifi-autologin \
+            linux/*.sh \
+            linux/networkmanager/90-campus-wifi-autologin \
+            linux/debian/config linux/debian/postinst linux/debian/prerm linux/debian/postrm
+
+      - name: Build .deb
+        run: linux/build-deb.sh
+
+      - name: Install, smoke test and purge
+        run: |
+          printf '%s\n' \
+            'campus-wifi-autologin campus-wifi-autologin/netid string ci-user' \
+            'campus-wifi-autologin campus-wifi-autologin/password password ci-pass' \
+            | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./dist/campus-wifi-autologin_*_all.deb
+          campus-wifi-autologin version
+          sudo test "$(stat -c '%a %U' /etc/campus-wifi-autologin/config)" = "600 root"
+          systemd-analyze verify /usr/lib/systemd/system/campus-wifi-autologin.service \
+                                 /usr/lib/systemd/system/campus-wifi-autologin.timer
+          systemctl is-enabled campus-wifi-autologin.timer
+          sudo campus-wifi-autologin run
+          sudo apt-get purge -y campus-wifi-autologin
+          test ! -e /etc/campus-wifi-autologin
+
+  windows:
+    name: Windows - PowerShell analysis
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse and ASCII check
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($f in Get-ChildItem windows -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
+            if ($errors) { $failed = $true; $errors | ForEach-Object { Write-Error "$($f.Name): $($_.Message)" } }
+            if ([IO.File]::ReadAllBytes($f.FullName) | Where-Object { $_ -gt 127 }) {
+              $failed = $true; Write-Error "$($f.Name) contains non-ASCII characters (breaks Windows PowerShell 5.1)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path windows -Recurse -Severity Error
+          $issues | Format-Table -AutoSize
+          if ($issues) { exit 1 }

@@ -1,0 +1,56 @@
+#!/bin/sh
+# shellcheck disable=SC2119,SC1091
+set -e
+
+CONF_DIR=/etc/campus-wifi-autologin
+CONF="$CONF_DIR/config"
+
+case "$1" in
+configure|reconfigure)
+    . /usr/share/debconf/confmodule
+
+    db_get campus-wifi-autologin/netid;    NETID="$RET"
+    db_get campus-wifi-autologin/password; PASS="$RET"
+    # Never keep the password in the debconf database.
+    db_set campus-wifi-autologin/password ""
+    db_fset campus-wifi-autologin/password seen false
+    db_stop
+
+    if [ -n "$NETID" ] && [ -n "$PASS" ]; then
+        mkdir -p "$CONF_DIR"
+        chmod 755 "$CONF_DIR"
+        TMP="$(umask 077 && mktemp "$CONF_DIR/.config.XXXXXX")"
+        {
+            echo "# campus-wifi-autologin configuration (root-only). Edit with: sudo campus-wifi-autologin setup"
+            echo "NETID=$NETID"
+            echo "PASSWORD=$PASS"
+            echo "TARGET_SSID=eepiswlan"
+            echo "PORTAL_DOMAIN=pens.ac.id"
+            echo "MAX_ATTEMPTS=6"
+            echo "RETRY_DELAY=10"
+            echo "VERBOSE=0"
+        } > "$TMP"
+        chmod 600 "$TMP"
+        chown root:root "$TMP"
+        mv -f "$TMP" "$CONF"
+    fi
+    unset PASS
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable campus-wifi-autologin.timer >/dev/null 2>&1 || true
+        systemctl restart campus-wifi-autologin.timer >/dev/null 2>&1 || true
+        if [ -s "$CONF" ]; then
+            systemctl start --no-block campus-wifi-autologin.service >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [ ! -s "$CONF" ]; then
+        echo ""
+        echo "campus-wifi-autologin: no credentials configured yet. Run:"
+        echo "    sudo campus-wifi-autologin setup"
+        echo ""
+    fi
+    ;;
+esac
+exit 0

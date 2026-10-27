@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic check for the PENS campus Wi-Fi captive portal
+Documentation=https://github.com/Kenshin517/campus-wifi-autologin
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
