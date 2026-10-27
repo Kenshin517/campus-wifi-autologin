@@ -99,7 +99,7 @@ Add-Type -AssemblyName System.Web
 # ------------------------------------------------------------------------------
 function Write-Log {
     param([Parameter(Mandatory)][string]$Message)
-    $line = '{0}  {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+    $line = '{0}  {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $Message
     try {
         Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
         $lines = @(Get-Content -LiteralPath $LogPath -ErrorAction Stop)

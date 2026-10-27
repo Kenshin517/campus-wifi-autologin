@@ -59,6 +59,22 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      - name: Install and uninstall under an Indonesian locale
+        shell: pwsh
+        run: |
+          # Regression test: id-ID uses '.' as time separator, which once broke the task XML.
+          Set-Culture id-ID
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+            `$pw = ConvertTo-SecureString 'ci-pass' -AsPlainText -Force
+            & '.\windows\Install.ps1' -NetId 'ci-user' -Password `$pw
+            if (-not `$?) { exit 1 }"
+          $task = Get-ScheduledTask -TaskName CampusWifiAutologin -ErrorAction Stop
+          $task.Triggers | Format-Table -AutoSize
+          if ($task.Principal.UserId -ne 'SYSTEM') { throw "Task must run as SYSTEM, got $($task.Principal.UserId)" }
+          if (-not (Test-Path "$env:ProgramData\CampusWifiAutologin\config.json")) { throw 'config.json missing' }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Uninstall.ps1
+          if (Get-ScheduledTask -TaskName CampusWifiAutologin -ErrorAction SilentlyContinue) { throw 'task not removed' }
+
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |

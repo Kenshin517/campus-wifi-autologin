@@ -24,6 +24,7 @@
 [CmdletBinding()]
 param(
     [string]$NetId,
+    [SecureString]$Password,   # for unattended installs; prompted when omitted
     [string]$TargetSsid = 'eepiswlan'
 )
 
@@ -93,7 +94,8 @@ while (-not $NetId) { $NetId = (Read-Host 'NetID').Trim() }
 
 $plain = ''
 while (-not $plain) {
-    $secure = Read-Host 'Password (input is hidden)' -AsSecureString
+    $secure = if ($Password) { $Password } else { Read-Host 'Password (input is hidden)' -AsSecureString }
+    $Password = $null
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
     try   { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
@@ -145,7 +147,8 @@ $eventQuery = '<QueryList><Query Id="0" Path="Microsoft-Windows-NetworkProfile/O
 $eventQueryXml = [Security.SecurityElement]::Escape($eventQuery)
 $argsXml = [Security.SecurityElement]::Escape(
     "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TargetScript`"")
-$start = (Get-Date).Date.ToString('yyyy-MM-ddTHH:mm:ss')
+# Task XML needs ISO 8601; ':' in .NET formats is the *culture's* time separator (e.g. '.' on id-ID).
+$start = (Get-Date).Date.ToString('s', [Globalization.CultureInfo]::InvariantCulture)
 
 $taskXml = @"
 <?xml version="1.0" encoding="UTF-16"?>

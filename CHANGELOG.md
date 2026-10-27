@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-10-28
+
+### Fixed
+- Windows installer failed with `0x80041318 ... StartBoundary:2026-10-28T00.00.00` on
+  systems with an Indonesian (or any '.'-time-separator) locale, leaving no scheduled
+  task registered. Dates are now formatted culture-invariantly.
+
+### Added
+- `Install.ps1 -Password` for unattended installs.
+- CI installs and uninstalls the Windows version under the `id-ID` locale.
+
 ## [2.0.0] - 2026-10-28
 
 ### Fixed
@@ -40,5 +51,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - First release: Windows PowerShell script with Task Scheduler triggers and
   DPAPI-encrypted credentials.
 
+[2.0.1]: https://github.com/Kenshin517/campus-wifi-autologin/compare/5dd791d...master
 [2.0.0]: https://github.com/Kenshin517/campus-wifi-autologin/commit/5dd791d
 [1.0.0]: https://github.com/Kenshin517/campus-wifi-autologin/commit/a098326

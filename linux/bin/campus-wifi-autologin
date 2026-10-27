@@ -14,7 +14,7 @@
 
 set -uo pipefail
 
-readonly VERSION="2.0.0"
+readonly VERSION="2.0.1"
 readonly PROG="campus-wifi-autologin"
 
 CONFIG_FILE="${CAMPUS_WIFI_CONFIG:-/etc/campus-wifi-autologin/config}"

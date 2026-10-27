@@ -75,7 +75,7 @@ Requirements: systemd (or cron), `curl`, and preferably NetworkManager. Tested o
 **Option A: `.deb` package (Debian, Ubuntu, Mint, Pop!_OS, ...)**
 
 ```bash
-sudo apt install ./campus-wifi-autologin_2.0.0_all.deb
+sudo apt install ./campus-wifi-autologin_2.0.1_all.deb
 ```
 
 You are asked for your NetID and password during installation. Build the package yourself with `linux/build-deb.sh` (output goes to `dist/`).

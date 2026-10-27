@@ -1,3 +1,9 @@
+campus-wifi-autologin (2.0.1) unstable; urgency=medium
+
+  * No Linux changes; version aligned with the Windows locale fix.
+
+ -- Sandy Aprilando <sandyaprilando59@gmail.com>  Wed, 28 Oct 2026 07:05:00 +0700
+
 campus-wifi-autologin (2.0.0) unstable; urgency=medium
 
   * Rewrite: retries while the network starts, portal URL cache, systemd
