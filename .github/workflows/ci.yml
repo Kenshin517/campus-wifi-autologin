@@ -72,8 +72,41 @@ jobs:
           $task.Triggers | Format-Table -AutoSize
           if ($task.Principal.UserId -ne 'SYSTEM') { throw "Task must run as SYSTEM, got $($task.Principal.UserId)" }
           if (-not (Test-Path "$env:ProgramData\CampusWifiAutologin\config.json")) { throw 'config.json missing' }
+          # The first run must leave visible evidence in the log and state file.
+          $log = Get-Content "$env:ProgramData\CampusWifiAutologin\autologin.log" -Raw
+          Write-Host $log
+          if ($log -notmatch 'OK: online|SUCCESS|Connected to') { throw 'first run wrote no status line to the log' }
+          if (-not (Test-Path "$env:ProgramData\CampusWifiAutologin\state.json")) { throw 'state.json missing' }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Status.ps1
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\Uninstall.ps1
           if (Get-ScheduledTask -TaskName CampusWifiAutologin -ErrorAction SilentlyContinue) { throw 'task not removed' }
+
+      - name: Batch launchers survive awkward folder names
+        shell: pwsh
+        run: |
+          # Regression test: a ')' in the path (e.g. "...-master (1)") used to make
+          # install.bat abort silently. Stub scripts are used so no prompt appears.
+          $dir = Join-Path $env:RUNNER_TEMP "campus-wifi-autologin-master (1) & it's\windows"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Copy-Item windows\*.bat $dir
+          foreach ($name in 'Install', 'Uninstall', 'Status') {
+            Set-Content (Join-Path $dir "$name.ps1") "Set-Content -LiteralPath (Join-Path `$PSScriptRoot 'ran.txt') '$($name.ToLower())'"
+          }
+          foreach ($bat in 'install', 'uninstall', 'status') {
+            Remove-Item (Join-Path $dir 'ran.txt') -ErrorAction SilentlyContinue
+            $out = cmd.exe /c "`"$(Join-Path $dir "$bat.bat")`" < nul" 2>&1 | Out-String
+            $ran = Get-Content (Join-Path $dir 'ran.txt') -ErrorAction SilentlyContinue
+            if ($ran -ne $bat) { Write-Host $out; throw "$bat.bat did not run its script from '$dir'" }
+            Write-Host "$bat.bat OK"
+          }
+
+          # Running install.bat on its own (e.g. straight from inside the ZIP) must explain itself.
+          $lonely = Join-Path $env:RUNNER_TEMP 'lonely'
+          New-Item -ItemType Directory -Path $lonely -Force | Out-Null
+          Copy-Item windows\install.bat $lonely
+          $out = cmd.exe /c "`"$lonely\install.bat`" < nul" 2>&1 | Out-String
+          if ($out -notmatch 'Extract') { Write-Host $out; throw 'install.bat did not explain the missing files' }
+          Write-Host 'missing-files message OK'
 
       - name: PSScriptAnalyzer
         shell: pwsh

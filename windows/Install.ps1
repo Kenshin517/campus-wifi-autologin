@@ -216,6 +216,8 @@ Write-Step "Scheduled task '$TaskName' registered (startup, on network connect, 
 # ------------------------------------------------------------------------------
 # 4. First run
 # ------------------------------------------------------------------------------
+# Forget the previous state so the first check always writes a visible log line.
+Remove-Item -LiteralPath (Join-Path $InstallDir 'state.json') -ErrorAction SilentlyContinue
 Write-Info 'Running a first check...'
 Start-ScheduledTask -TaskName $TaskName
 $deadline = (Get-Date).AddSeconds(90)
@@ -228,10 +230,11 @@ Write-Host ''
 Write-Host '  Last log lines:' -ForegroundColor White
 $tail = Get-Content -LiteralPath $LogPath -Tail 6 -ErrorAction SilentlyContinue
 if ($tail) { $tail | ForEach-Object { Write-Host "    $_" } }
-else       { Write-Host '    (nothing logged - you are already online or not on campus Wi-Fi)' }
+else       { Write-Host '    (nothing logged yet - run status.bat in a minute)' }
 
 Write-Host ''
 Write-Host '  Done. Auto-login is active and runs in the background.' -ForegroundColor Green
 Write-Host "  Log file : $LogPath"
+Write-Host '  Check it any time by double-clicking status.bat.'
 Write-Host '  To change your password, run install.bat again.'
 Write-Host ''

@@ -37,6 +37,7 @@ $AppDir        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigPath    = Join-Path $AppDir 'config.json'
 $LogPath       = Join-Path $AppDir 'autologin.log'
 $PortalCache   = Join-Path $AppDir 'portal-url.txt'
+$StatePath     = Join-Path $AppDir 'state.json'
 $LogMaxLines   = 500
 $Entropy       = [Text.Encoding]::UTF8.GetBytes('CampusWifiAutologin')
 
@@ -266,39 +267,31 @@ function Invoke-PortalLogin {
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
-$mutex = New-Object Threading.Mutex($false, 'Global\CampusWifiAutologin')
-try { $acquired = $mutex.WaitOne(0) }
-catch [Threading.AbandonedMutexException] { $acquired = $true }   # previous run was killed
-if (-not $acquired) { exit 0 }   # another run is already in progress
-$rejectedCount = 0
+function Invoke-Check {
+    <#
+        One check-and-login pass. Returns @{ Status; Ssid; Code } where Status is
+        one of: other-network, online, logged-in, rejected, failed.
+    #>
+    param([hashtable]$Cfg)
 
-try {
-    try { $cfg = Get-Config }
-    catch { Write-Log "ERROR: $($_.Exception.Message)"; exit 1 }
-
-    [CampusWifiCertPolicy]::Domain = $cfg.PortalDomain
-    [CampusWifiCertPolicy]::Install()
-
-    for ($attempt = 1; $attempt -le $cfg.MaxAttempts; $attempt++) {
+    $rejectedCount = 0
+    $ssid = $null
+    for ($attempt = 1; $attempt -le $Cfg.MaxAttempts; $attempt++) {
         $ssid = Get-WifiSsid
 
-        if ($ssid -and $ssid -ne $cfg.TargetSsid) {
-            if ($VerbosePreference -ne 'SilentlyContinue') { Write-Log "Not on $($cfg.TargetSsid) (SSID: $ssid). Skipping." }
-            exit 0
+        if ($ssid -and $ssid -ne $Cfg.TargetSsid) {
+            return @{ Status = 'other-network'; Ssid = $ssid; Code = 0 }
         }
-
         if (Test-Internet) {
-            if ($attempt -gt 1) { Write-Log 'Internet is reachable.' }
-            elseif ($VerbosePreference -ne 'SilentlyContinue') { Write-Log 'Already online.' }
-            exit 0
+            return @{ Status = 'online'; Ssid = $ssid; Code = 0 }
         }
 
         if ($attempt -eq 1) {
             $label = if ($ssid) { $ssid } else { 'unknown SSID' }
-            Write-Log "No internet on $label. Starting login (up to $($cfg.MaxAttempts) attempts)."
+            Write-Log "No internet on $label. Starting login (up to $($Cfg.MaxAttempts) attempts)."
         }
 
-        $portal = Find-PortalUrl -Domain $cfg.PortalDomain
+        $portal = Find-PortalUrl -Domain $Cfg.PortalDomain
         if ($portal) {
             Set-Content -LiteralPath $PortalCache -Value $portal -Encoding ASCII
         } elseif (Test-Path -LiteralPath $PortalCache) {
@@ -306,36 +299,99 @@ try {
             Write-Log "Attempt ${attempt}: portal redirect not seen, using last known portal URL."
         }
 
-        if (-not (Test-PortalHost -Url $portal -Domain $cfg.PortalDomain)) {
+        if (-not (Test-PortalHost -Url $portal -Domain $Cfg.PortalDomain)) {
             # Without a known SSID, only act when the campus portal is actually seen.
             Write-Log "Attempt ${attempt}: captive portal not found yet (network may still be starting)."
-            Start-Sleep -Seconds $cfg.RetryDelay
+            Start-Sleep -Seconds $Cfg.RetryDelay
             continue
         }
 
         Write-Log "Attempt ${attempt}: portal $(([Uri]$portal).GetLeftPart([UriPartial]::Path))"
-        $result = Invoke-PortalLogin -LoginUrl $portal -Cfg $cfg
+        $result = Invoke-PortalLogin -LoginUrl $portal -Cfg $Cfg
         Start-Sleep -Seconds 3
 
         if (Test-Internet) {
             Write-Log 'SUCCESS: logged in, internet is reachable.'
-            exit 0
+            return @{ Status = 'logged-in'; Ssid = $ssid; Code = 0 }
         }
         if ($result -eq 'rejected') {
             $rejectedCount++
             # Stop early instead of hammering the portal with a wrong password.
             if ($rejectedCount -ge 2) {
                 Write-Log 'Portal rejected the login twice. Check your NetID/password and run install.bat again.'
-                exit 2
+                return @{ Status = 'rejected'; Ssid = $ssid; Code = 2 }
             }
         }
-        Start-Sleep -Seconds $cfg.RetryDelay
+        Start-Sleep -Seconds $Cfg.RetryDelay
     }
 
-    Write-Log "FAILED after $($cfg.MaxAttempts) attempts. Will retry on the next scheduled run."
-    exit 1
+    Write-Log "FAILED after $($Cfg.MaxAttempts) attempts. Will retry on the next scheduled run."
+    return @{ Status = 'failed'; Ssid = $ssid; Code = 1 }
+}
+
+function Save-State {
+    <#
+        Records the result of this run in state.json (read by status.bat) and logs
+        one line whenever the situation changes, so the log shows that the tool is
+        alive even when no login was needed (e.g. the portal session from earlier
+        today is still valid).
+    #>
+    param([hashtable]$Result, [hashtable]$Cfg)
+
+    $previous = $null
+    if (Test-Path -LiteralPath $StatePath) {
+        try { $previous = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json } catch { }
+    }
+    $ssidText = if ($Result.Ssid) { $Result.Ssid } else { '' }
+    $online = $Result.Status -in @('online', 'logged-in')
+    $changed = (-not $previous) -or ($previous.Ssid -ne $ssidText) -or ([bool]$previous.Online -ne $online)
+
+    if ($changed -or $VerbosePreference -ne 'SilentlyContinue') {
+        switch ($Result.Status) {
+            'other-network' { Write-Log "Connected to '$ssidText' (not $($Cfg.TargetSsid)). Nothing to do." }
+            'online' {
+                $where = if ($ssidText) { $ssidText } else { 'the current network' }
+                Write-Log "OK: online on $where. No login needed (portal session still active or already logged in)."
+            }
+        }
+    }
+
+    $now = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+    $state = [ordered]@{
+        LastCheck   = $now
+        Ssid        = $ssidText
+        Online      = $online
+        LastResult  = $Result.Status
+        LastLogin   = if ($Result.Status -eq 'logged-in') { $now } elseif ($previous) { $previous.LastLogin } else { $null }
+    }
+    try {
+        [IO.File]::WriteAllText($StatePath, ($state | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    } catch { }
+}
+
+$mutex = New-Object Threading.Mutex($false, 'Global\CampusWifiAutologin')
+try { $acquired = $mutex.WaitOne(0) }
+catch [Threading.AbandonedMutexException] { $acquired = $true }   # previous run was killed
+if (-not $acquired) { exit 0 }   # another run is already in progress
+
+$exitCode = 0
+try {
+    try { $cfg = Get-Config }
+    catch { Write-Log "ERROR: $($_.Exception.Message)"; exit 1 }
+
+    [CampusWifiCertPolicy]::Domain = $cfg.PortalDomain
+    [CampusWifiCertPolicy]::Install()
+
+    $result = Invoke-Check -Cfg $cfg
+    Save-State -Result $result -Cfg $cfg
+    $exitCode = $result.Code
+}
+catch {
+    Write-Log "ERROR: $($_.Exception.Message)"
+    $exitCode = 1
 }
 finally {
     $mutex.ReleaseMutex()
     $mutex.Dispose()
 }
+exit $exitCode

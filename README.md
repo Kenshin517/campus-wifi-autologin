@@ -60,6 +60,8 @@ cd campus-wifi-autologin\windows
 
 That's it. The installer copies everything it needs to `C:\ProgramData\CampusWifiAutologin`, so you can delete the downloaded folder afterwards.
 
+> **Extract the ZIP first.** Double-clicking `install.bat` while still *inside* the ZIP cannot work, because Windows copies only that one file out.
+>
 > If SmartScreen shows *"Windows protected your PC"*, choose **More info → Run anyway**. This is normal for a newly downloaded `.bat` file.
 
 <details>
@@ -75,7 +77,7 @@ Requirements: systemd (or cron), `curl`, and preferably NetworkManager. Tested o
 **Option A: `.deb` package (Debian, Ubuntu, Mint, Pop!_OS, ...)**
 
 ```bash
-sudo apt install ./campus-wifi-autologin_2.0.1_all.deb
+sudo apt install ./campus-wifi-autologin_2.0.2_all.deb
 ```
 
 You are asked for your NetID and password during installation. Build the package yourself with `linux/build-deb.sh` (output goes to `dist/`).
@@ -96,6 +98,7 @@ After installation there is nothing to do: connect to `eepiswlan` and you are on
 
 | Task | How |
 | --- | --- |
+| Check that it works | Double-click `windows\status.bat` (no Administrator needed) |
 | Change NetID / password | Run `windows\install.bat` again |
 | View the log | `notepad C:\ProgramData\CampusWifiAutologin\autologin.log` |
 | Run a check now | `schtasks /run /tn CampusWifiAutologin` (as Administrator) |
@@ -140,7 +143,7 @@ The campus portal is served over HTTPS on port `8003` of a `*.pens.ac.id` host (
 | Credential storage | `config.json`, password encrypted with DPAPI (machine scope), ACL: SYSTEM + Administrators | `/etc/campus-wifi-autologin/config`, mode `600 root:root` |
 | Log | `C:\ProgramData\CampusWifiAutologin\autologin.log` | `/var/log/campus-wifi-autologin/autologin.log` |
 
-Routine checks (already online, not on campus) are not logged, so the log only shows real login activity.
+The log gets one line whenever the situation changes (joined another network, came online on campus, logged in, failed), and stays quiet while nothing changes. The time of the last check is always recorded, which `status.bat` / `campus-wifi-autologin status` show.
 
 ## Configuration
 
@@ -166,7 +169,10 @@ Start with the log (see [Usage](#usage)). Typical messages:
 | `captive portal not found yet` | Normal for the first seconds after connecting; the tool retries. If every attempt says this, the portal did not redirect. Open any `http://` site in a browser to confirm the portal is up. |
 | `Portal rejected the login twice` | Wrong NetID or password. Re-run the installer (Windows) or `sudo campus-wifi-autologin setup` (Linux). |
 | `FAILED after 6 attempts` | The portal was reachable but login did not give internet access. It is retried automatically at the next trigger; if it keeps happening, open an [issue](https://github.com/Kenshin517/campus-wifi-autologin/issues) with the log. |
-| Nothing is logged at all | You are already online or not on `eepiswlan`. That is expected. |
+| `OK: online on eepiswlan. No login needed` | Working as intended: the portal still remembered your device (it keeps the session per device for the day), so no login was necessary. |
+| Nothing new in the log | Nothing changed since the last line. Run `status.bat` to see the time of the last check; if it is more than ~10 minutes old, run `install.bat` again. |
+
+**Double-clicking `install.bat` shows nothing.** Make sure the ZIP is extracted (right-click → *Extract All...*). If a black window flashes and disappears, you are on v2.0.1 or older: download the latest version, which also handles folder names such as `campus-wifi-autologin-master (1)`. If a *"Part of this app has been blocked"* notice appears (Smart App Control), right-click the ZIP → *Properties* → tick **Unblock** before extracting.
 
 **Testing from a logged-out state.** The portal remembers sessions per MAC address on the server, so reconnecting does not log you out. To test, enable *Random hardware addresses* for `eepiswlan` (Windows: Settings → Network → Wi-Fi) or set `wifi.cloned-mac-address=random` in NetworkManager, then reconnect.
 
@@ -202,8 +208,10 @@ campus-wifi-autologin/
 ├── windows/
 │   ├── install.bat                   # double-click to install / reconfigure
 │   ├── uninstall.bat                 # double-click to remove
+│   ├── status.bat                    # double-click to check that it works
 │   ├── Install.ps1                   # installer (credentials, ACLs, scheduled task)
 │   ├── Uninstall.ps1
+│   ├── Status.ps1
 │   └── CampusWifiAutologin.ps1       # the login script run by Task Scheduler
 ├── linux/
 │   ├── bin/campus-wifi-autologin     # CLI: run | setup | status | logs

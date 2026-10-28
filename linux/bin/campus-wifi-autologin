@@ -14,7 +14,7 @@
 
 set -uo pipefail
 
-readonly VERSION="2.0.1"
+readonly VERSION="2.0.2"
 readonly PROG="campus-wifi-autologin"
 
 CONFIG_FILE="${CAMPUS_WIFI_CONFIG:-/etc/campus-wifi-autologin/config}"
@@ -218,6 +218,18 @@ submit_login() {
     return 0
 }
 
+# Logs $2 only when the situation (key $1) differs from the previous run, so the
+# log proves the tool is alive without repeating itself every two minutes.
+note_state() {
+    local key="$1" msg="$2" prev=""
+    [ -r "$STATE_DIR/last-state" ] && prev="$(cat "$STATE_DIR/last-state")"
+    if [ -n "$msg" ] && { [ "$key" != "$prev" ] || [ "$VERBOSE" = "1" ]; }; then
+        log "$msg"
+    fi
+    printf '%s\n' "$key" >"$STATE_DIR/last-state" 2>/dev/null
+    date '+%Y-%m-%d %H:%M:%S' >"$STATE_DIR/last-check" 2>/dev/null
+}
+
 # ------------------------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------------------------
@@ -235,12 +247,17 @@ cmd_run() {
         ssid="$(get_ssid)"
 
         if [ -n "$ssid" ] && [ "$ssid" != "$TARGET_SSID" ]; then
-            vlog "Not on $TARGET_SSID (SSID: $ssid). Skipping."
+            note_state "other:$ssid" "Connected to '$ssid' (not $TARGET_SSID). Nothing to do."
             return 0
         fi
 
         if has_internet; then
-            if [ "$attempt" -gt 1 ]; then log "Internet is reachable."; else vlog "Already online."; fi
+            if [ "$attempt" -gt 1 ]; then
+                log "Internet is reachable."
+                note_state "online:$ssid" ""
+            else
+                note_state "online:$ssid" "OK: online on ${ssid:-the current network}. No login needed (portal session still active or already logged in)."
+            fi
             return 0
         fi
 
@@ -268,6 +285,7 @@ cmd_run() {
 
         if has_internet; then
             log "SUCCESS: logged in, internet is reachable."
+            note_state "online:$ssid" ""
             return 0
         fi
         if [ "$result" -eq 2 ]; then
@@ -345,6 +363,11 @@ cmd_status() {
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         echo "Timer        : $(systemctl is-active campus-wifi-autologin.timer 2>/dev/null)," \
             "$(systemctl is-enabled campus-wifi-autologin.timer 2>/dev/null)"
+    fi
+    if [ -r "$STATE_DIR/last-check" ]; then
+        echo "Last check   : $(cat "$STATE_DIR/last-check")"
+    elif [ -d "$STATE_DIR" ] && [ ! -r "$STATE_DIR" ]; then
+        echo "Last check   : (run with sudo to see)"
     fi
     echo
     echo "Recent log ($LOG_FILE):"
